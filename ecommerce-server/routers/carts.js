@@ -80,3 +80,47 @@ router.post('/:cid/product/:pid', (req, res) => {
 });
 
 module.exports = router;
+
+const Ticket = require('../models/Ticket');
+const Cart = require('../models/Cart');
+const Product = require('../models/Product');
+
+router.post('/:cid/purchase', async (req, res) => {
+  try {
+    const { cid } = req.params;
+    const cart = await Cart.findById(cid).populate('products.product');
+    if (!cart) return res.status(404).json({ message: 'Carrito no encontrado' });
+
+    let totalAmount = 0;
+    const productsNotPurchased = [];
+
+    for (const item of cart.products) {
+      const product = item.product;
+
+      if (product.stock >= item.quantity) {
+        product.stock -= item.quantity;
+        totalAmount += product.price * item.quantity;
+        await product.save();
+      } else {
+        productsNotPurchased.push(product._id);
+      }
+    }
+
+    if (totalAmount > 0) {
+      await Ticket.create({
+        amount: totalAmount,
+        purchaser: req.user.email
+      });
+    }
+
+    cart.products = cart.products.filter(item => productsNotPurchased.includes(item.product._id));
+    await cart.save();
+
+    res.status(200).json({
+      message: 'Compra realizada',
+      notPurchased: productsNotPurchased
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error en la compra', error });
+  }
+});
